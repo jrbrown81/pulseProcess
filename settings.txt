@@ -1,0 +1,6 @@
+bslMin: 0
+bslMax: 1000
+polarity: 1
+timeConst: 1000
+poleZ: 0.0015
+n_poles: 4

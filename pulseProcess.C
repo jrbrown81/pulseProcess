@@ -1,10 +1,22 @@
 /*
  pulseProcess
 
- Based on txt2tree.C (see below).
- Version 1.0
- Some old code removed, and gaussianfilter parameters are now defined near the top
- for ease of adjustment.
+ Version 4.0
+ Now reads in pulse shaping settings at run time from a file ('settings.txt').
+
+ Version 3.0
+ Suspect there are some other 2.x versions around so jump to version 3.0
+ Corrected bug which wasn't using baseline subtracted data for gaussian shaping.
+ Now stores pulses by default. -p options doesn't store pulses.
+ baseline subtracted data now written to file as well.
+
+ Version 2.1
+ Messed about with version, e.g. defaults to saving pulses again, can be used with -n option...
+
+ Version 2.0
+ Made further additions to gaussianfilter. Can now define number of poles,
+ specify the pole zero correction and gain factor scales shaped pulse to comparible
+ amplitude to un shaped pulse.
 
  Version 1.1
  Doesn't save pulses by default, can save them using -p option.
@@ -14,19 +26,11 @@
 
  to only process first 10 pulses.
 
- Version 2.0
- Made further additions to gaussianfilter. Can now define number of poles,
- specify the pole zero correction and gain factor scales shaped pulse to comparible
- amplitude to un shaped pulse.
+ Version 1.0
+ Some old code removed, and gaussianfilter parameters are now defined near the top
+ for ease of adjustment.
 
- Version 2.1
- Messed about with version, e.g. defaults to saving pulses again, can be used with -n option...
-
- Version 3.0
- Suspect there are some other 2.x versions around so jump to version 3.0
- Corrected bug which wasn't using baseline subtracted data for gaussian shaping.
- Now stores pulses by default. -p options doesn't store pulses.
- baseline subtracted data now written to file as well.
+ Based on txt2tree.C (see below).
 
 -------------------
   Developed from:
@@ -44,7 +48,7 @@ Modified by Stefanos Paschalis 02/2017 for MPhys projects (Harry PSA with V1730B
 
 To compile this code needs to be linked to ROOT libraries, use:
 
-g++ `root-config --cflags --libs` -Wl,--no-as-needed -lTree -lRIO -lCore -lHist pulseProcess_2.0.C -o pulseProcess2
+g++ `root-config --cflags --libs` -Wl,--no-as-needed -lTree -lRIO -lCore -lHist pulseProcess.C -o pulseProcess4
 
 --no-as-needed, -lTree -lRIO -lCore -lHist is used to work around some linking issues in Ubuntu. Probably not needed on less pedantic systems
 
@@ -80,7 +84,7 @@ tree->Draw("hist.Draw()","","goff",1,12) which will plot one event starting at e
 
 //using namespace std;
 
-std::string version="3.0";
+std::string version="4.0";
 // New options to store pulses (or not) and process a limited number of pulses
 
 struct headerdata {
@@ -110,9 +114,10 @@ DC offset (DAC): 0xF5C1
 
 // Some user parameters.
 const int array_length=50000;
+// These are overwritten by values read in from 'settings.txt'
 // range to be used for baseline integration
 double bslMin=0;
-double bslMax=500;
+double bslMax=1000;
 int polarity= 1;  // 1 for positive pulses, -1 for negative
 int timeConst=1000;  // samples
 double poleZ=0.0015;
@@ -146,6 +151,7 @@ struct pulsedata {
 //int txt2tree(char * infile, char * outfile);
 int txt2tree(char * infile, char * outfile, bool storePulses, int nPulses);
 void Usage();
+void readSettings(TString settingsFile);
 void printheaderdata(headerdata hdrdata);
 void clearheaderdata(headerdata hdrdata);
 void clearpulsedata(pulsedata &plsdata);
@@ -162,14 +168,21 @@ void GetGaussPeak(pulsedata &plsdata, Int_t samples);
 int main(int argc, char **argv)
 {
 
-	std::cout << std::endl << "------------------------" << std::endl
-	<< "pulseProcess Version " << version << std::endl
-	<< "------------------------" << std::endl << std::endl;
+   std::cout << std::endl << "------------------------" << std::endl
+   << "pulseProcess Version " << version << std::endl
+   << "------------------------" << std::endl << std::endl;
 
+//   settings
+   std::ifstream settings("settings.txt");
+   if (!settings){
+      std::cout << "'settings.txt' file not found! Exiting." << std::endl;
+      return 0;
+   } else readSettings("settings.txt");
 
 if(argc == 3){
 
 //  std::cout << argv[0] << std::endl;
+  std::cout << std::endl;
   std::cout << "input filename:  " << argv[1] << std::endl;
   std::cout << "output filename: " << argv[2] << std::endl;
 	
@@ -669,7 +682,49 @@ void GetGaussPeak(pulsedata &plsdata, Int_t samples){
 //else
 //  std::cout << "polarity should be 1 or -1" << std::endl;
 
+}
 
+void readSettings(TString settingsFile){
+
+   std::ifstream settings(settingsFile);
+   std::cout << "Reading pulse shaping settings from file: '" << settingsFile << "'" << std::endl;
+   std::string line;
+   while(!settings.eof() ){
+      getline(settings,line);
+      TString sline = TString(line);
+      if (sline.BeginsWith("/")) continue;
+      if (sline.Contains("bslMin: ")) {
+         sline.ReplaceAll("bslMin: ","");
+         bslMin = sline.Atoi();
+         std::cout << "bslMin = " << bslMin << std::endl;
+      }
+      if (sline.Contains("bslMax: ")) {
+         sline.ReplaceAll("bslMax: ","");
+         bslMax = sline.Atoi();
+         std::cout << "bslMax = " << bslMax << std::endl;
+      }
+      if (sline.Contains("polarity: ")) {
+         sline.ReplaceAll("polarity: ","");
+         polarity = sline.Atoi();
+         std::cout << "polarity = " << polarity << std::endl;
+      }
+      if (sline.Contains("timeConst: ")) {
+         sline.ReplaceAll("timeConst: ","");
+         timeConst = sline.Atoi();
+         std::cout << "timeConst = " << timeConst << std::endl;
+      }
+      if (sline.Contains("poleZ: ")) {
+         sline.ReplaceAll("poleZ: ","");
+         poleZ = sline.Atof();
+         std::cout << "poleZ = " << poleZ << std::endl;
+      }
+      if (sline.Contains("n_poles: ")) {
+         sline.ReplaceAll("n_poles: ","");
+         n_poles = sline.Atoi();
+         std::cout << "n_poles = " << n_poles << std::endl;
+      }
+   }
+   std::cout << std::endl;
 
 }
 

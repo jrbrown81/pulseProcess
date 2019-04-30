@@ -80,11 +80,11 @@ tree->Draw("hist.Draw()","","goff",1,12) which will plot one event starting at e
 // 2 header data being written to file
 // 4 both of the above
 // 8 all data - pulse and header
-#define debug 0
+#define debug 8
 
 //using namespace std;
 
-std::string version="4.0";
+std::string version="dev";
 // New options to store pulses (or not) and process a limited number of pulses
 
 struct headerdata {
@@ -122,6 +122,8 @@ int polarity= 1;  // 1 for positive pulses, -1 for negative
 int timeConst=1000;  // samples
 double poleZ=0.0015;
 int n_poles=4;
+int headers=1;
+int traceLength=8200;
 
 //	Gain = (n_poles!)/(n_poles^n_poles * exp(-n_poles));
 	double gain=5.11858; // for n_poles=4
@@ -191,17 +193,19 @@ if(argc == 3){
 else if(argc > 3){
 	if(argv[1][0]=='-') {
 		if(argv[1][1]=='p') {
-  		std::cout << "input filename:  " << argv[argc-2] << std::endl;
-  		std::cout << "output filename: " << argv[argc-1] << std::endl;
-			std::cout << "Not storing pulses to rootfile" << std::endl;
+  		   std::cout << "input filename:  " << argv[argc-2] << std::endl;
+  		   std::cout << "output filename: " << argv[argc-1] << std::endl;
+			std::cout << std::endl << "******************************" << std::endl
+         << "Not storing pulses to rootfile" << std::endl
+         << "******************************" << std::endl << std::endl;
 			txt2tree(argv[argc-2], argv[argc-1],0,-1);
 		}
 		else if(argv[1][1]=='n' && argc==5 && isdigit(argv[2][0])) {
-				int nPulses=atoi(argv[2]);
+         int nPulses=atoi(argv[2]);
   			std::cout << "input filename:  " << argv[argc-2] << std::endl;
   			std::cout << "output filename: " << argv[argc-1] << std::endl;
-				std::cout << "Processing " << nPulses << " pulses" 	<< std::endl;
-				txt2tree(argv[argc-2], argv[argc-1], 1, nPulses);
+			std::cout << "Processing " << nPulses << " pulses" 	<< std::endl;
+			txt2tree(argv[argc-2], argv[argc-1], 1, nPulses);
 		}
 		else {
 			Usage();
@@ -240,13 +244,13 @@ pulsedata plsdata;
 
 //some counters to help with sanity checks
 //number of points read in from a pulse
-int datapointcounter;
+int datapointcounter=0;
 //number of waveforms found in file
 int waveformcounter = 0;
 // for(int i=0; i<array_length; i++) timeStep[i]=i;
 
 //the output file and tree
-TFile * out = new TFile(outfile,"recreate");
+TFile * out = new TFile(outfile,"");
 TTree * tree = new TTree("tree","tree");
 
 //create a branch to store the histogram pulses
@@ -293,8 +297,6 @@ tree->Branch("gaussmax",&plsdata.gaussmax,"gaussmax/d");
 clearheaderdata(hdrdata);
 clearpulsedata(plsdata);
 
-
-//while( waveformcounter<5000 ){
 while( !in.eof() && waveformcounter!=nPulses ){
 
 	//get the data and save as a string
@@ -303,6 +305,7 @@ while( !in.eof() && waveformcounter!=nPulses ){
 	//then check for each of the header titles, if it doesn't contain a header title it must be data
 	if( data.find("Record Length: ") != std::string::npos ) {
 		//this is the start of a new event so fill the tree with the data stored from the previous event.
+      if(headers==0) std::cout <<"*******Warning: Headers are present in this file********" << std::endl;
 		if( waveformcounter > 0){
 		  postprocess(plsdata);
 		  //for(int i=0; i<array_length; i++) hist->Fill(i,plsdata.data[i]);
@@ -331,6 +334,7 @@ while( !in.eof() && waveformcounter!=nPulses ){
 			std::cout << "Pulses processed: " << waveformcounter << std::endl;
 	}
 	else if( data.find("BoardID:") != std::string::npos ) {
+      if(headers==0) std::cout <<"*******Warning: Headers are present in this file********" << std::endl;
 		if(debug == 1 || debug == 4 || debug == 8) std::cout << data << std::endl;
 		last = data.find(":") + 2; // don't want the : or the whitespace 
 		data.erase(0,last);
@@ -338,50 +342,47 @@ while( !in.eof() && waveformcounter!=nPulses ){
 
 	}
 	else if( data.find("Channel:") != std::string::npos ) {
+      if(headers==0) std::cout <<"*******Warning: Headers are present in this file********" << std::endl;
 		if(debug == 1 || debug == 4 || debug == 8) std::cout << data << std::endl;
 		last = data.find(":") + 2; // don't want the : or the whitespace 
 		data.erase(0,last);
 	   hdrdata.channel = atof(data.data());
-
 	}
 	else if( data.find("Event Number:") != std::string::npos ) {
+      if(headers==0) std::cout <<"*******Warning: Headers are present in this file********" << std::endl;
 		if(debug == 1 || debug == 4 || debug == 8) std::cout << data << std::endl;
 		last = data.find(":") + 2; // don't want the : or the whitespace 
 		data.erase(0,last);
 	   hdrdata.eventnumber = atof(data.data());
-
 	}
-	else if( data.find("Pattern:") != std::string::npos ) {  
+	else if( data.find("Pattern:") != std::string::npos ) {
+      if(headers==0) std::cout <<"*******Warning: Headers are present in this file********" << std::endl;
 		if(debug == 1 || debug == 4 || debug == 8) std::cout << data << std::endl;
 		last = data.find(":") + 2; // don't want the : or the whitespace 
 		data.erase(0,last);
 	   hdrdata.pattern = atof(data.data());
-
 	}
 	else if( data.find("Trigger Time Stamp:") != std::string::npos ) {
+      if(headers==0) std::cout <<"*******Warning: Headers are present in this file********" << std::endl;
 		if(debug == 1 || debug == 4 || debug == 8) std::cout << data << std::endl;
 		last = data.find(":") + 2; // don't want the : or the whitespace 
 		data.erase(0,last);
 	   hdrdata.triggertimestamp = atof(data.data());
-		
-	}	
+	}
 	else if( data.find("DC offset (DAC):") != std::string::npos ) {
+      if(headers==0) std::cout <<"*******Warning: Headers are present in this file********" << std::endl;
 		if(debug == 1 || debug == 4 || debug == 8) std::cout << data << std::endl;
 		last = data.find(":") + 2; // don't want the : or the whitespace 
 		data.erase(0,last);
 	   hdrdata.dcoffset = atof(data.data());
 	   if(debug == 2 || debug == 4 || debug == 8) printheaderdata(hdrdata);
-
 	}
-	else {
+	else { // This must be data as not header info.
 		datapointcounter++;
 		double tmpdata = atof(data.data());
-		if(debug == 8) std::cout << tmpdata << std::endl;
-//		std::cout << "filling histogram" << std::endl;
+		if(debug == 8) std::cout << waveformcounter << " " << datapointcounter << " " << tmpdata << std::endl;
 		plsdata.data[datapointcounter-1] = atof(data.data());
-		//hist->Fill(datapointcounter, tmpdata);
-//	if(datapointcounter<=50){
-//		plsdata.bsl+=atof(data.data());}
+
 // note, need the -1 here as datapointcounter starts from 1
 	if(datapointcounter-1>=bslMin && datapointcounter-1<bslMax){
 		plsdata.bsl+=atof(data.data());}
@@ -392,27 +393,50 @@ while( !in.eof() && waveformcounter!=nPulses ){
 */
 	}
 
+// if no headers, this is the start of a new event so fill the tree with the data stored from the previous event.
+   if(headers==0 && datapointcounter==traceLength) {
+      if(debug) std::cout << "*******Processing event********" << std::endl;
+      postprocess(plsdata);
+      if(debug) std::cout << "*******Filling tree********" << std::endl;
+      tree->Fill();
+      if (waveformcounter!=0 && waveformcounter%10000 == 1) {
+         if(debug) std::cout << "*******Writing tree********" << std::endl;
+         tree->Write("",TObject::kOverwrite);
+      }
+      waveformcounter++;
+      //now we collect data from the next event so we should reset the datapointcounter
+      datapointcounter = 0;
+//      if(debug) std::cout << "*******Beginning of new event********" << std::endl;
+      //print something so we know the whole thing is working
+      if(waveformcounter!=0 && waveformcounter%1000 == 0)
+         std::cout << "Pulses processed: " << waveformcounter << std::endl;
+   }
+
 }
 
 // After reading all data, fill the tree with last pulse and write to file etc.
 if( waveformcounter > 0){
-		  postprocess(plsdata);
+   if(debug) std::cout << "*******Processing event********" << std::endl;
+	postprocess(plsdata);
 		  //for(int i=0; i<array_length; i++) hist->Fill(i,plsdata.data[i]);
 // 		  for(int i=0; i<array_length; i++) hist->Fill(i,plsdata.data_bsl[i]);
 // 		  plsdata.pulseMax=hist->GetMaximum();
 // 		  energy->Fill(plsdata.pulseMax);
-		  tree->Fill();
+		  if(debug) std::cout << "*******Filling tree********" << std::endl;
+        tree->Fill();
 		  //the data in the histogram is in the tree so we can clear it
 // 		  hist->Reset();
-		  if (waveformcounter%10000 == 1) tree->Write("",TObject::kOverwrite);
+//   if (waveformcounter%10000 == 1) tree->Write("",TObject::kOverwrite);
+   if(debug) std::cout << "*******Writing tree********" << std::endl;
+   tree->Write("",TObject::kOverwrite);
 }
 waveformcounter++;
 //now we collect data from the next event so we should clear the hdrdata structure
 clearheaderdata(hdrdata);
 clearpulsedata(plsdata);
 datapointcounter = 0;
-if(debug) std::cout << "*******Beginning of new event header********" << std::endl;
-if(debug == 1 || debug == 4 || debug == 8) std::cout << data << "  " << std::endl;
+//if(debug) std::cout << "*******Beginning of new event header********" << std::endl;
+//if(debug == 1 || debug == 4 || debug == 8) std::cout << data << "  " << std::endl;
 //some string maths which will delete the title and leave just the numerical value
 last = data.find(":") + 2; // don't want the : or the whitespace
 data.erase(0,last);
@@ -433,7 +457,6 @@ return 1;
 }
 
 //some helper functions
-
 void Usage(){
 
 std::cout << "Usage: \n" << "'./pulseProcess <inputfile> <outputfile>'" << std::endl;
@@ -441,7 +464,6 @@ std::cout << "'./pulseProcess [-p] <inputfile> <outputfile>'   to NOT store puls
 std::cout << "'./pulseProcess [-n <N_pulses>] <inputfile> <outputfile>'   to process a limited number of pulses" << std::endl;
 
 }
-
 
 void printheaderdata(headerdata hdrdata){
 
@@ -494,8 +516,7 @@ void postprocess(pulsedata &plsdata){
 //gaussianfilter(plsdata,array_length,10,10);
 //	if(poleZ!=0) poleZ=1/poleZ;
 //	if(poleZ==0) poleZ=1/poleZ;
-  gaussianfilter(plsdata,array_length,timeConst,poleZ, n_poles);
-//  gaussianfilter(plsdata,array_length,timeConst,100);
+  gaussianfilter(plsdata,array_length,timeConst,poleZ,n_poles);
   GetGaussPeak(plsdata, array_length);
 }
 
@@ -575,7 +596,6 @@ void t0_align(pulsedata &plsdata, Int_t samples){
       plsdata.data_t0_aligned[i] = -100;
 
       }
-
 }
 
 void Q1Q2pp(pulsedata &plsdata, Int_t samples){
@@ -588,8 +608,6 @@ void Q1Q2pp(pulsedata &plsdata, Int_t samples){
 }
 
 void gaussianfilter(pulsedata &plsdata, Int_t samples, Double_t tau, Double_t pz, int n_poles) {
-
-//	int n_poles=4;
 
 	int i, j;
 	double a0, a1, b1;
@@ -604,10 +622,8 @@ void gaussianfilter(pulsedata &plsdata, Int_t samples, Double_t tau, Double_t pz
 		z[i] = 0.0;
 	}
 
-
 //single pole high pass filter
 //with pole-zero correction
-
 	b1 = TMath::Exp(-1.0 / tau);
 	a0 = (1.0 + b1) / 2.0;
 	a1 = -1*(1.0+b1) / 2.0;
@@ -619,7 +635,6 @@ void gaussianfilter(pulsedata &plsdata, Int_t samples, Double_t tau, Double_t pz
 		y[i] = b1*y[i-1] + a0 * x2 + a1*x1 + x1*pz;
 	}
      
-        
 // n-pole low pass filter
 	b1 = TMath::Exp(-1.0 / tau);
 	a0 = 1.0 - b1;
@@ -630,7 +645,7 @@ void gaussianfilter(pulsedata &plsdata, Int_t samples, Double_t tau, Double_t pz
 		for(i = 1; i < samples; i++)
 			y[i] = z[i];
 	}
-	for(i = 1; i < samples; i++) plsdata.data_gaussianfilter[i] =gain*z[i];
+	for(i = 1; i < samples; i++) plsdata.data_gaussianfilter[i]=gain*z[i];
 
 //// average of every 10 samples, to shorten shaped pulse length
 //	double sum=0;
@@ -657,31 +672,13 @@ void gaussianfilter(pulsedata &plsdata, Int_t samples, Double_t tau, Double_t pz
 
 void GetGaussPeak(pulsedata &plsdata, Int_t samples){
 
-  Double_t max=0;
+ Double_t max=0;
 
  for(Int_t i = 1; i < samples; i++)
    if(max < plsdata.data_gaussianfilter[i])
      max = plsdata.data_gaussianfilter[i];
 
  plsdata.gaussmax = max;
-
-//if(polarity==1){
-// for(Int_t i = 1; i < samples; i++)
-//   if(max < plsdata.data_gaussianfilter[i])
-//     max = plsdata.data_gaussianfilter[i];
-
-// plsdata.gaussmax = max;
-//}
-//else if(polarity==-1){
-// for(Int_t i = 1; i < samples; i++)
- //  if(max < plsdata.data_gaussianfilter[i])
-//     max = plsdata.data_gaussianfilter[i];
-
-// plsdata.gaussmax = -max;
-//}
-//else
-//  std::cout << "polarity should be 1 or -1" << std::endl;
-
 }
 
 void readSettings(TString settingsFile){
@@ -722,6 +719,16 @@ void readSettings(TString settingsFile){
          sline.ReplaceAll("n_poles: ","");
          n_poles = sline.Atoi();
          std::cout << "n_poles = " << n_poles << std::endl;
+      }
+      if (sline.Contains("headers: ")) {
+         sline.ReplaceAll("headers: ","");
+         headers = sline.Atoi();
+         std::cout << "headers = " << headers << std::endl;
+      }
+      if (sline.Contains("traceLength: ")) {
+         sline.ReplaceAll("traceLength: ","");
+         traceLength = sline.Atoi();
+         std::cout << "traceLength = " << traceLength << std::endl;
       }
    }
    std::cout << std::endl;

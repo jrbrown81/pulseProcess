@@ -1,6 +1,10 @@
 /*
  pulseProcess
 
+Version 5.0
+ Looks for header data in file to define record length.
+ If not found, issues warning and reads from settings.txt
+ 
  Version 4.0
  Now reads in pulse shaping settings at run time from a file ('settings.txt').
 
@@ -48,7 +52,7 @@ Modified by Stefanos Paschalis 02/2017 for MPhys projects (Harry PSA with V1730B
 
 To compile this code needs to be linked to ROOT libraries, use:
 
-g++ `root-config --cflags --libs` -Wl,--no-as-needed -lTree -lRIO -lCore -lHist pulseProcess.C -o pulseProcess4
+g++ `root-config --cflags --libs` -Wl,--no-as-needed -lTree -lRIO -lCore -lHist pulseProcess.C -o pulseProcess5
 
 --no-as-needed, -lTree -lRIO -lCore -lHist is used to work around some linking issues in Ubuntu. Probably not needed on less pedantic systems
 
@@ -80,11 +84,11 @@ tree->Draw("hist.Draw()","","goff",1,12) which will plot one event starting at e
 // 2 header data being written to file
 // 4 both of the above
 // 8 all data - pulse and header
-#define debug 8
+#define debug 0
 
 //using namespace std;
 
-std::string version="dev";
+std::string version="5.0";
 // New options to store pulses (or not) and process a limited number of pulses
 
 struct headerdata {
@@ -122,7 +126,7 @@ int polarity= 1;  // 1 for positive pulses, -1 for negative
 int timeConst=1000;  // samples
 double poleZ=0.0015;
 int n_poles=4;
-int headers=1;
+int headers=0;
 int traceLength=8200;
 
 //	Gain = (n_poles!)/(n_poles^n_poles * exp(-n_poles));
@@ -151,7 +155,7 @@ struct pulsedata {
 
 //declaring functions which are defined below
 //int txt2tree(char * infile, char * outfile);
-int txt2tree(char * infile, char * outfile, bool storePulses, int nPulses);
+int txt2tree(char * infile, char * outfile, bool storePulses, int nPulses=-100);
 void Usage();
 void readSettings(TString settingsFile);
 void printheaderdata(headerdata hdrdata);
@@ -174,21 +178,13 @@ int main(int argc, char **argv)
    << "pulseProcess Version " << version << std::endl
    << "------------------------" << std::endl << std::endl;
 
-//   settings
-   std::ifstream settings("settings.txt");
-   if (!settings){
-      std::cout << "'settings.txt' file not found! Exiting." << std::endl;
-      return 0;
-   } else readSettings("settings.txt");
-
 if(argc == 3){
 
 //  std::cout << argv[0] << std::endl;
-  std::cout << std::endl;
   std::cout << "input filename:  " << argv[1] << std::endl;
   std::cout << "output filename: " << argv[2] << std::endl;
 	
-	txt2tree(argv[argc-2], argv[argc-1],1,-1);
+	txt2tree(argv[argc-2], argv[argc-1],1);
 }
 else if(argc > 3){
 	if(argv[1][0]=='-') {
@@ -198,7 +194,7 @@ else if(argc > 3){
 			std::cout << std::endl << "******************************" << std::endl
          << "Not storing pulses to rootfile" << std::endl
          << "******************************" << std::endl << std::endl;
-			txt2tree(argv[argc-2], argv[argc-1],0,-1);
+			txt2tree(argv[argc-2], argv[argc-1],0);
 		}
 		else if(argv[1][1]=='n' && argc==5 && isdigit(argv[2][0])) {
          int nPulses=atoi(argv[2]);
@@ -228,6 +224,14 @@ return 1;
 
 int txt2tree(char * infile, char * outfile, bool storePulses, int nPulses){
 
+//   settings
+   std::ifstream settings("settings.txt");
+   if (!settings){
+      std::cout << "'settings.txt' file not found! Exiting." << std::endl;
+      return 0;
+   } else readSettings("settings.txt");
+
+
 std::ifstream in(infile);
 
 std::string data;
@@ -238,19 +242,16 @@ size_t last;
 headerdata hdrdata;
 pulsedata plsdata;
 
-//TH1I * hist = new TH1I("hist","hist",16390,0,16390);
-// TH1I * hist = new TH1I("hist","hist",array_length,0,array_length);
-// TH1I* energy = new TH1I("energy","energy",1000,0,10000);
-
 //some counters to help with sanity checks
 //number of points read in from a pulse
 int datapointcounter=0;
 //number of waveforms found in file
 int waveformcounter = 0;
+int processedCounter = 0;
 // for(int i=0; i<array_length; i++) timeStep[i]=i;
 
 //the output file and tree
-TFile * out = new TFile(outfile,"");
+TFile * out = new TFile(outfile,"RECREATE");
 TTree * tree = new TTree("tree","tree");
 
 //create a branch to store the histogram pulses
@@ -275,6 +276,10 @@ tree->Branch("headerinfo",&hdrdata,"recordlength/I:recordlength/d:boardid/d:chan
 tree->Branch("recordlength",&hdrdata.recordlengthI,"recordlengthI/I");
 
 if(storePulses) {
+   std::cout << "******* Storing pulses to root tree *******" << std::endl;
+   
+   if(!headers) hdrdata.recordlengthI=traceLength;
+   
 	tree->Branch("pulsedata",plsdata.data,"pulsedata[recordlengthI]/d");
 // tree->Branch("pulsedata",plsdata.data,"pulsedata[10000]/d");
  	tree->Branch("pulsedata_bsl",plsdata.data_bsl,"pulsedata_bsl[recordlengthI]/d");
@@ -294,7 +299,7 @@ tree->Branch("t0",&plsdata.t0,"t0/d");
 tree->Branch("gaussmax",&plsdata.gaussmax,"gaussmax/d");
 
 //lets start with a clean header data structure
-clearheaderdata(hdrdata);
+if(headers) clearheaderdata(hdrdata);
 clearpulsedata(plsdata);
 
 while( !in.eof() && waveformcounter!=nPulses ){
@@ -304,151 +309,104 @@ while( !in.eof() && waveformcounter!=nPulses ){
 	//reading in as a string so lets use the first item in the header to denote a new event
 	//then check for each of the header titles, if it doesn't contain a header title it must be data
 	if( data.find("Record Length: ") != std::string::npos ) {
-		//this is the start of a new event so fill the tree with the data stored from the previous event.
-      if(headers==0) std::cout <<"*******Warning: Headers are present in this file********" << std::endl;
-		if( waveformcounter > 0){
-		  postprocess(plsdata);
-		  //for(int i=0; i<array_length; i++) hist->Fill(i,plsdata.data[i]);
-// 		  for(int i=0; i<array_length; i++) hist->Fill(i,plsdata.data_bsl[i]);
-// 		  plsdata.pulseMax=hist->GetMaximum();
-// 		  energy->Fill(plsdata.pulseMax);
-		  tree->Fill();
-		  //the data in the histogram is in the tree so we can clear it
-// 		  hist->Reset();
-		  if (waveformcounter%10000 == 1) tree->Write("",TObject::kOverwrite);
-		}
-		waveformcounter++;
-		//now we collect data from the next event so we should clear the hdrdata structure 
-		clearheaderdata(hdrdata);
-		clearpulsedata(plsdata);
-		datapointcounter = 0;
+      if(datapointcounter==0 && headers==0) {
+         std::cout << "******* Headers detected *******" << std::endl;
+         headers=1;
+      }
 		if(debug) std::cout << "*******Beginning of new event header********" << std::endl;
 		if(debug == 1 || debug == 4 || debug == 8) std::cout << data << "  " << std::endl;
 		//some string maths which will delete the title and leave just the numerical value
 		last = data.find(":") + 2; // don't want the : or the whitespace 
 		data.erase(0,last);
-	   hdrdata.recordlength = atof(data.data());
-	   hdrdata.recordlengthI = atoi(data.data());
-		//print something so we know the whole thing is working
-		if(waveformcounter%1000 == 0)
-			std::cout << "Pulses processed: " << waveformcounter << std::endl;
+	   if(headers) {
+         hdrdata.recordlength = atof(data.data());
+	      hdrdata.recordlengthI = atoi(data.data());
+         traceLength=hdrdata.recordlengthI;
+      }
 	}
 	else if( data.find("BoardID:") != std::string::npos ) {
-      if(headers==0) std::cout <<"*******Warning: Headers are present in this file********" << std::endl;
 		if(debug == 1 || debug == 4 || debug == 8) std::cout << data << std::endl;
 		last = data.find(":") + 2; // don't want the : or the whitespace 
 		data.erase(0,last);
-	   hdrdata.boardid = atof(data.data());
-
+	   if(headers) hdrdata.boardid = atof(data.data());
 	}
 	else if( data.find("Channel:") != std::string::npos ) {
-      if(headers==0) std::cout <<"*******Warning: Headers are present in this file********" << std::endl;
 		if(debug == 1 || debug == 4 || debug == 8) std::cout << data << std::endl;
 		last = data.find(":") + 2; // don't want the : or the whitespace 
 		data.erase(0,last);
-	   hdrdata.channel = atof(data.data());
+	   if(headers) hdrdata.channel = atof(data.data());
 	}
 	else if( data.find("Event Number:") != std::string::npos ) {
-      if(headers==0) std::cout <<"*******Warning: Headers are present in this file********" << std::endl;
 		if(debug == 1 || debug == 4 || debug == 8) std::cout << data << std::endl;
 		last = data.find(":") + 2; // don't want the : or the whitespace 
 		data.erase(0,last);
-	   hdrdata.eventnumber = atof(data.data());
+	   if(headers) hdrdata.eventnumber = atof(data.data());
 	}
 	else if( data.find("Pattern:") != std::string::npos ) {
-      if(headers==0) std::cout <<"*******Warning: Headers are present in this file********" << std::endl;
 		if(debug == 1 || debug == 4 || debug == 8) std::cout << data << std::endl;
 		last = data.find(":") + 2; // don't want the : or the whitespace 
 		data.erase(0,last);
-	   hdrdata.pattern = atof(data.data());
+	   if(headers) hdrdata.pattern = atof(data.data());
 	}
 	else if( data.find("Trigger Time Stamp:") != std::string::npos ) {
-      if(headers==0) std::cout <<"*******Warning: Headers are present in this file********" << std::endl;
 		if(debug == 1 || debug == 4 || debug == 8) std::cout << data << std::endl;
 		last = data.find(":") + 2; // don't want the : or the whitespace 
 		data.erase(0,last);
-	   hdrdata.triggertimestamp = atof(data.data());
+	   if(headers) hdrdata.triggertimestamp = atof(data.data());
 	}
 	else if( data.find("DC offset (DAC):") != std::string::npos ) {
-      if(headers==0) std::cout <<"*******Warning: Headers are present in this file********" << std::endl;
 		if(debug == 1 || debug == 4 || debug == 8) std::cout << data << std::endl;
 		last = data.find(":") + 2; // don't want the : or the whitespace 
 		data.erase(0,last);
-	   hdrdata.dcoffset = atof(data.data());
-	   if(debug == 2 || debug == 4 || debug == 8) printheaderdata(hdrdata);
+	   if(headers) {
+         hdrdata.dcoffset = atof(data.data());
+	      if(debug == 2 || debug == 4 || debug == 8) printheaderdata(hdrdata);
+      }
 	}
 	else { // This must be data as not header info.
+      if(headers==0 && waveformcounter==0 && datapointcounter==0) {
+         std::cout << std::endl
+                     << "|*******************************************|" << std::endl
+                     << "|  Warning: No headers found in this file   |" << std::endl
+                     << "|  Is traceLength in settings file correct? |" << std::endl
+                     << "|*******************************************|" << std::endl << std::endl;
+      }
+ 
+      // Check if complete pulse has been read, and process
+      if(datapointcounter==traceLength) {
+         waveformcounter++;
+         if(debug) std::cout << "*******Processing event********" << std::endl;
+         postprocess(plsdata);
+         processedCounter++;
+         if(debug) std::cout << "*******Filling tree********" << std::endl;
+         tree->Fill();
+         if (processedCounter%10000 == 1) {
+            if(debug) std::cout << "*******Writing tree********" << std::endl;
+            tree->Write("",TObject::kOverwrite);
+         }
+      // now we collect data from the next event so we should reset the datapointcounter
+         if(headers) clearheaderdata(hdrdata);
+         clearpulsedata(plsdata);
+         datapointcounter = 0;
+      //print something so we know the whole thing is working
+         if(processedCounter%1000 == 0) std::cout << "Pulses processed: " << processedCounter << std::endl;
+      }
 		datapointcounter++;
 		double tmpdata = atof(data.data());
-		if(debug == 8) std::cout << waveformcounter << " " << datapointcounter << " " << tmpdata << std::endl;
 		plsdata.data[datapointcounter-1] = atof(data.data());
+      if(debug == 8) std::cout << waveformcounter << " " << datapointcounter << " " << plsdata.data[datapointcounter-1] << std::endl;
 
 // note, need the -1 here as datapointcounter starts from 1
-	if(datapointcounter-1>=bslMin && datapointcounter-1<bslMax){
-		plsdata.bsl+=atof(data.data());}
-/*        if(datapointcounter>50 && datapointcounter<=150){
-       		plsdata.Q1+=atof(data.data());}
-	else if(datapointcounter>150 && datapointcounter<=300){
-		plsdata.Q2+=atof(data.data());}
-*/
+	   if(datapointcounter-1>=bslMin && datapointcounter-1<bslMax){
+		   plsdata.bsl+=atof(data.data());}
 	}
+   
+} // End of "while( !in.eof() && waveformcounter!=nPulses )"
 
-// if no headers, this is the start of a new event so fill the tree with the data stored from the previous event.
-   if(headers==0 && datapointcounter==traceLength) {
-      if(debug) std::cout << "*******Processing event********" << std::endl;
-      postprocess(plsdata);
-      if(debug) std::cout << "*******Filling tree********" << std::endl;
-      tree->Fill();
-      if (waveformcounter!=0 && waveformcounter%10000 == 1) {
-         if(debug) std::cout << "*******Writing tree********" << std::endl;
-         tree->Write("",TObject::kOverwrite);
-      }
-      waveformcounter++;
-      //now we collect data from the next event so we should reset the datapointcounter
-      datapointcounter = 0;
-//      if(debug) std::cout << "*******Beginning of new event********" << std::endl;
-      //print something so we know the whole thing is working
-      if(waveformcounter!=0 && waveformcounter%1000 == 0)
-         std::cout << "Pulses processed: " << waveformcounter << std::endl;
-   }
-
-}
-
-// After reading all data, fill the tree with last pulse and write to file etc.
-if( waveformcounter > 0){
-   if(debug) std::cout << "*******Processing event********" << std::endl;
-	postprocess(plsdata);
-		  //for(int i=0; i<array_length; i++) hist->Fill(i,plsdata.data[i]);
-// 		  for(int i=0; i<array_length; i++) hist->Fill(i,plsdata.data_bsl[i]);
-// 		  plsdata.pulseMax=hist->GetMaximum();
-// 		  energy->Fill(plsdata.pulseMax);
-		  if(debug) std::cout << "*******Filling tree********" << std::endl;
-        tree->Fill();
-		  //the data in the histogram is in the tree so we can clear it
-// 		  hist->Reset();
-//   if (waveformcounter%10000 == 1) tree->Write("",TObject::kOverwrite);
-   if(debug) std::cout << "*******Writing tree********" << std::endl;
-   tree->Write("",TObject::kOverwrite);
-}
-waveformcounter++;
-//now we collect data from the next event so we should clear the hdrdata structure
-clearheaderdata(hdrdata);
-clearpulsedata(plsdata);
-datapointcounter = 0;
-//if(debug) std::cout << "*******Beginning of new event header********" << std::endl;
-//if(debug == 1 || debug == 4 || debug == 8) std::cout << data << "  " << std::endl;
-//some string maths which will delete the title and leave just the numerical value
-last = data.find(":") + 2; // don't want the : or the whitespace
-data.erase(0,last);
-hdrdata.recordlength = atof(data.data());
-hdrdata.recordlengthI = atoi(data.data());
-//print something so we know the whole thing is working
-//if(waveformcounter%1000 == 0)
-std::cout << "Total pulses processed: " << waveformcounter-1 << std::endl;
+std::cout << std::endl << "Total pulses processed: " << processedCounter << std::endl;
 //////////
 
 out->cd();
-// energy->Write();
 tree->Write("",TObject::kOverwrite);
 out->Close();
 
@@ -684,7 +642,7 @@ void GetGaussPeak(pulsedata &plsdata, Int_t samples){
 void readSettings(TString settingsFile){
 
    std::ifstream settings(settingsFile);
-   std::cout << "Reading pulse shaping settings from file: '" << settingsFile << "'" << std::endl;
+   std::cout << std::endl << "Reading pulse shaping settings from file: '" << settingsFile << "'" << std::endl;
    std::string line;
    while(!settings.eof() ){
       getline(settings,line);
@@ -720,11 +678,11 @@ void readSettings(TString settingsFile){
          n_poles = sline.Atoi();
          std::cout << "n_poles = " << n_poles << std::endl;
       }
-      if (sline.Contains("headers: ")) {
-         sline.ReplaceAll("headers: ","");
-         headers = sline.Atoi();
-         std::cout << "headers = " << headers << std::endl;
-      }
+//      if (sline.Contains("headers: ")) {
+//         sline.ReplaceAll("headers: ","");
+//         headers = sline.Atoi();
+//         std::cout << "headers = " << headers << std::endl;
+//      }
       if (sline.Contains("traceLength: ")) {
          sline.ReplaceAll("traceLength: ","");
          traceLength = sline.Atoi();

@@ -117,7 +117,7 @@ DC offset (DAC): 0xF5C1
 
 
 // Some user parameters.
-const int array_length=50000;
+const int array_length=70000;
 // These are overwritten by values read in from 'settings.txt'
 // range to be used for baseline integration
 double bslMin=0;
@@ -322,6 +322,7 @@ while( !in.eof() && waveformcounter!=nPulses ){
          hdrdata.recordlength = atof(data.data());
 	      hdrdata.recordlengthI = atoi(data.data());
          traceLength=hdrdata.recordlengthI;
+         if(datapointcounter==0) std::cout << "Using Trace Length: " << traceLength << std::endl;
       }
 	}
 	else if( data.find("BoardID:") != std::string::npos ) {
